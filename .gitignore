@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# CERT dataset - DO NOT upload
+CERT_Dataset/
+
+# Generated datasets and outputs
+data/processed/
+data/outputs/
+data/raw/
+data/cert/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
