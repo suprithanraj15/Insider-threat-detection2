@@ -22,6 +22,7 @@ ALERTS_FILE = (
 SUPERVISOR_FILE = (
     PROJECT_ROOT / "data" / "outputs" / "supervisor_agent_results.parquet"
 )
+SIM_EVENTS_TABLE_AVAILABLE = False  # set to True once simulation module creates the table
 
 DB_CONFIG = {
     "host": os.environ["DB_HOST"],
@@ -44,6 +45,12 @@ app = FastAPI(
 # Mount chart data router
 from src.api.charts import router as charts_router  # noqa: E402
 app.include_router(charts_router)
+
+try:
+    from src.api.simulation import router as sim_router
+    app.include_router(sim_router)
+except ImportError:
+    pass  # simulation module not yet available
 
 
 class SecurityEventIn(BaseModel):
@@ -279,6 +286,179 @@ def health():
         "live_processing_table_available": processing_table_available,
         "live_assessments_table_available": assessments_table_available,
         "collector_checkpoint_exists": collector_active,
+    }
+
+
+@app.get("/api/system/health", tags=["System"])
+def system_health():
+    """
+    Per-component operational health for the System Status dashboard.
+    Each component reports status, last_check, metric, and description.
+    Never exposes DB credentials.
+    """
+    from datetime import datetime, timezone, timedelta
+    import subprocess
+
+    now = datetime.now(timezone.utc)
+    components = {}
+
+    # 1. Backend API (always operational if this endpoint is reachable)
+    components["backend_api"] = {
+        "name": "Backend API",
+        "status": "Operational",
+        "description": "FastAPI application serving detection and analytics endpoints.",
+        "metric": "API v1.3.0",
+        "last_check": now.isoformat(),
+        "error": None,
+    }
+
+    # 2. PostgreSQL Database
+    db_status = "Offline"
+    db_metric = "No connection"
+    db_error = None
+    db_events = 0
+    db_alerts = 0
+    try:
+        with psycopg.connect(**{**DB_CONFIG, "connect_timeout": 3}) as conn:
+            row = conn.execute(
+                "SELECT (SELECT count(*) FROM security_events) AS ev, "
+                "(SELECT count(*) FROM security_alerts) AS al"
+            ).fetchone()
+            db_events = row[0] if not isinstance(row, dict) else row["ev"]
+            db_alerts = row[1] if not isinstance(row, dict) else row["al"]
+            db_status = "Operational"
+            db_metric = f"{db_events:,} events · {db_alerts:,} alerts"
+    except psycopg.Error as exc:
+        db_status = "Offline"
+        db_error = "Database connection failed"
+    components["postgresql"] = {
+        "name": "PostgreSQL Database",
+        "status": db_status,
+        "description": "Primary data store for live security events and alerts (port 5434).",
+        "metric": db_metric,
+        "last_check": now.isoformat(),
+        "error": db_error,
+    }
+
+    # 3. Windows Event Collector (checkpoint file age)
+    checkpoint_file = PROJECT_ROOT / "data" / "outputs" / "system_event_checkpoint.txt"
+    collector_status = "Not configured"
+    collector_metric = "No checkpoint found"
+    collector_error = None
+    if checkpoint_file.exists():
+        mtime = datetime.fromtimestamp(checkpoint_file.stat().st_mtime, tz=timezone.utc)
+        age_minutes = (now - mtime).total_seconds() / 60
+        if age_minutes < 2:
+            collector_status = "Operational"
+            collector_metric = f"Last event collected {int(age_minutes * 60)}s ago"
+        elif age_minutes < 60:
+            collector_status = "Degraded"
+            collector_metric = f"Last event collected {int(age_minutes)}m ago"
+        else:
+            collector_status = "Offline"
+            collector_metric = f"No collection for {int(age_minutes / 60)}h {int(age_minutes % 60)}m"
+            collector_error = "Collector appears stopped"
+    components["collector"] = {
+        "name": "Windows Event Collector",
+        "status": collector_status,
+        "description": "PowerShell collector reading Windows System log (Service Control Manager events).",
+        "metric": collector_metric,
+        "last_check": now.isoformat(),
+        "error": collector_error,
+    }
+
+    # 4. Live Event Processor
+    processor_status = "Not configured"
+    processor_metric = "No processed events"
+    processor_error = None
+    if db_status == "Operational":
+        try:
+            with psycopg.connect(**DB_CONFIG, row_factory=dict_row) as conn:
+                row = conn.execute(
+                    "SELECT count(*) AS n, max(processed_at) AS last FROM live_event_processing"
+                ).fetchone()
+                count = row["n"] or 0
+                last = row["last"]
+                if last:
+                    age_min = (now - last).total_seconds() / 60
+                    processor_status = "Operational" if age_min < 60 else "Degraded"
+                    processor_metric = f"{count:,} events processed · last {int(age_min)}m ago"
+                elif count == 0:
+                    processor_status = "Not configured"
+                    processor_metric = "No events processed yet"
+        except psycopg.Error as exc:
+            processor_status = "Degraded"
+            processor_error = "Could not query processing table"
+    components["event_processor"] = {
+        "name": "Live Event Processor",
+        "status": processor_status,
+        "description": "Classifies collected Windows events (Service Install, Start-Type Change) into review signals.",
+        "metric": processor_metric,
+        "last_check": now.isoformat(),
+        "error": processor_error,
+    }
+
+    # 5. Live Risk Engine
+    engine_status = "Not configured"
+    engine_metric = "No assessments"
+    engine_error = None
+    if db_status == "Operational":
+        try:
+            with psycopg.connect(**DB_CONFIG, row_factory=dict_row) as conn:
+                row = conn.execute(
+                    "SELECT count(*) AS n, max(assessed_at) AS last, "
+                    "count(*) FILTER (WHERE risk_level = 'HIGH') AS hi, "
+                    "count(*) FILTER (WHERE risk_level = 'MEDIUM') AS med "
+                    "FROM live_event_assessments"
+                ).fetchone()
+                count = row["n"] or 0
+                last = row["last"]
+                hi = row["hi"] or 0
+                med = row["med"] or 0
+                if last:
+                    age_min = (now - last).total_seconds() / 60
+                    engine_status = "Operational" if age_min < 60 else "Degraded"
+                    engine_metric = f"{count:,} assessed · {hi} HIGH · {med} MEDIUM"
+                elif count == 0:
+                    engine_status = "Not configured"
+                    engine_metric = "No assessments yet"
+        except psycopg.Error as exc:
+            engine_status = "Degraded"
+            engine_error = "Could not query assessments table"
+    components["risk_engine"] = {
+        "name": "Live Risk Engine",
+        "status": engine_status,
+        "description": "Rule-based Windows service lifecycle scorer with event correlation (LIVE_WINDOWS_SERVICE_RULE).",
+        "metric": engine_metric,
+        "last_check": now.isoformat(),
+        "error": engine_error,
+    }
+
+    # 6. Frontend
+    components["frontend"] = {
+        "name": "Frontend Application",
+        "status": "Operational",
+        "description": "React + Vite dashboard served on localhost:5173.",
+        "metric": "React 19 · Vite dev server",
+        "last_check": now.isoformat(),
+        "error": None,
+    }
+
+    # Overall status
+    statuses = [c["status"] for c in components.values()]
+    if "Offline" in statuses:
+        overall = "Degraded"
+    elif "Degraded" in statuses:
+        overall = "Degraded"
+    elif all(s in ("Operational", "Not configured") for s in statuses):
+        overall = "Operational"
+    else:
+        overall = "Unknown"
+
+    return {
+        "overall_status": overall,
+        "checked_at": now.isoformat(),
+        "components": components,
     }
 
 

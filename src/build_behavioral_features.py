@@ -1,6 +1,8 @@
+
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 # ============================================================
@@ -23,6 +25,12 @@ OUTPUT_FILE = (
     / "behavioral_features.parquet"
 )
 
+ENGINE = "fastparquet"
+
+# Minimum historical observations required before calculating
+# a meaningful per-user baseline.
+MIN_HISTORY = 3
+
 
 # ============================================================
 # LOAD DATA
@@ -34,9 +42,34 @@ print("=" * 60)
 
 print("\n1. Loading labeled user-day data...")
 
-df = pd.read_parquet(INPUT_FILE)
+df = pd.read_parquet(INPUT_FILE, engine=ENGINE)
+df["day"] = pd.to_datetime(df["day"], errors="raise")
 
-df["day"] = pd.to_datetime(df["day"])
+required_columns = [
+    "user",
+    "day",
+    "ground_truth",
+    "logon_events",
+    "device_events",
+    "file_events",
+    "emails_sent",
+    "web_visits",
+    "unique_files",
+    "total_email_size",
+    "recipient_count",
+    "unique_urls",
+    "unique_domains",
+]
+
+missing = [col for col in required_columns if col not in df.columns]
+if missing:
+    raise ValueError(f"Missing required columns: {missing}")
+
+if df[["user", "day"]].isna().any().any():
+    raise ValueError("'user' and 'day' must not contain missing values.")
+
+if df.duplicated(["user", "day"]).any():
+    raise ValueError("Expected one row per user per day; duplicates found.")
 
 print(f"Rows: {len(df):,}")
 print(f"Users: {df['user'].nunique():,}")
@@ -68,12 +101,8 @@ activity_columns = [
 
 df["total_activity"] = df[activity_columns].sum(axis=1)
 
-df["active_channels"] = (
-    (df["logon_events"] > 0).astype(int)
-    + (df["device_events"] > 0).astype(int)
-    + (df["file_events"] > 0).astype(int)
-    + (df["emails_sent"] > 0).astype(int)
-    + (df["web_visits"] > 0).astype(int)
+df["active_channels"] = sum(
+    (df[col] > 0).astype(int) for col in activity_columns
 )
 
 
@@ -84,8 +113,7 @@ df["active_channels"] = (
 print("\n4. Creating device behavior features...")
 
 df["device_activity_ratio"] = (
-    df["device_events"] /
-    (df["total_activity"] + 1)
+    df["device_events"] / (df["total_activity"] + 1)
 )
 
 
@@ -96,13 +124,11 @@ df["device_activity_ratio"] = (
 print("\n5. Creating file behavior features...")
 
 df["file_activity_ratio"] = (
-    df["file_events"] /
-    (df["total_activity"] + 1)
+    df["file_events"] / (df["total_activity"] + 1)
 )
 
 df["file_diversity"] = (
-    df["unique_files"] /
-    (df["file_events"] + 1)
+    df["unique_files"] / (df["file_events"] + 1)
 )
 
 
@@ -113,18 +139,15 @@ df["file_diversity"] = (
 print("\n6. Creating email behavior features...")
 
 df["email_activity_ratio"] = (
-    df["emails_sent"] /
-    (df["total_activity"] + 1)
+    df["emails_sent"] / (df["total_activity"] + 1)
 )
 
 df["avg_email_size"] = (
-    df["total_email_size"] /
-    (df["emails_sent"] + 1)
+    df["total_email_size"] / (df["emails_sent"] + 1)
 )
 
 df["avg_recipients_per_email"] = (
-    df["recipient_count"] /
-    (df["emails_sent"] + 1)
+    df["recipient_count"] / (df["emails_sent"] + 1)
 )
 
 
@@ -135,26 +158,33 @@ df["avg_recipients_per_email"] = (
 print("\n7. Creating web behavior features...")
 
 df["web_activity_ratio"] = (
-    df["web_visits"] /
-    (df["total_activity"] + 1)
+    df["web_visits"] / (df["total_activity"] + 1)
 )
 
 df["url_diversity"] = (
-    df["unique_urls"] /
-    (df["web_visits"] + 1)
+    df["unique_urls"] / (df["web_visits"] + 1)
 )
 
 df["domain_diversity"] = (
-    df["unique_domains"] /
-    (df["web_visits"] + 1)
+    df["unique_domains"] / (df["web_visits"] + 1)
 )
 
 
 # ============================================================
-# USER BASELINE FEATURES
+# HISTORICAL USER BASELINES
 # ============================================================
 
-print("\n8. Creating user behavioral baselines...")
+print("\n8. Creating past-only user behavioral baselines...")
+
+# IMPORTANT:
+# Baselines for a given user-day use only that user's earlier
+# rows. The current day is excluded with shift(1).
+#
+# This implementation uses all previous observations, including
+# previously labeled malicious days. It does not use future labels
+# to decide which historical rows are normal.
+
+df = df.sort_values(["user", "day"]).reset_index(drop=True)
 
 baseline_columns = [
     "total_activity",
@@ -165,17 +195,34 @@ baseline_columns = [
     "web_visits",
 ]
 
+grouped = df.groupby("user", sort=False)
+
 for col in baseline_columns:
+    history = grouped[col].shift(1)
 
-    user_mean = df.groupby("user")[col].transform("mean")
-    user_std = df.groupby("user")[col].transform("std")
+    historical_mean = (
+        history.groupby(df["user"], sort=False)
+        .expanding(min_periods=MIN_HISTORY)
+        .mean()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
 
-    user_std = user_std.replace(0, np.nan)
+    historical_std = (
+        history.groupby(df["user"], sort=False)
+        .expanding(min_periods=MIN_HISTORY)
+        .std()
+        .reset_index(level=0, drop=True)
+        .sort_index()
+    )
+
+    # A zero or unavailable standard deviation cannot provide a
+    # useful z-score. Such scores are set to zero.
+    valid_std = historical_std.where(historical_std > 0)
 
     df[f"{col}_zscore"] = (
-        (df[col] - user_mean) /
-        user_std
-    ).fillna(0)
+        (df[col] - historical_mean) / valid_std
+    ).replace([np.inf, -np.inf], np.nan).fillna(0)
 
 
 # ============================================================
@@ -185,14 +232,11 @@ for col in baseline_columns:
 print("\n9. Creating overall behavior deviation...")
 
 zscore_columns = [
-    f"{col}_zscore"
-    for col in baseline_columns
+    f"{col}_zscore" for col in baseline_columns
 ]
 
 df["behavior_deviation"] = (
-    df[zscore_columns]
-    .abs()
-    .mean(axis=1)
+    df[zscore_columns].abs().mean(axis=1)
 )
 
 
@@ -205,10 +249,9 @@ print("\n10. Cleaning feature table...")
 df = df.replace([np.inf, -np.inf], np.nan)
 
 numeric_columns = df.select_dtypes(include=[np.number]).columns
-
 df[numeric_columns] = df[numeric_columns].fillna(0)
 
-df = df.sort_values(["user", "day"])
+df = df.sort_values(["user", "day"]).reset_index(drop=True)
 
 
 # ============================================================
@@ -217,7 +260,8 @@ df = df.sort_values(["user", "day"])
 
 df.to_parquet(
     OUTPUT_FILE,
-    index=False
+    engine=ENGINE,
+    index=False,
 )
 
 
@@ -232,14 +276,9 @@ print("=" * 60)
 print(f"Rows: {len(df):,}")
 print(f"Columns: {len(df.columns)}")
 print(f"Users: {df['user'].nunique():,}")
-
-print(f"\nGround-truth malicious days: {df['ground_truth'].sum():,}")
-
-print(f"\nSaved:")
-print(OUTPUT_FILE)
+print(f"Ground-truth malicious days: {df['ground_truth'].sum():,}")
 
 print("\nBehavioral features added:")
-
 new_features = [
     "day_of_week",
     "is_weekend",
@@ -259,3 +298,9 @@ new_features = [
 
 for feature in new_features:
     print(f"  - {feature}")
+
+print("\nHistorical baseline z-scores:")
+for col in baseline_columns:
+    print(f"  - {col}_zscore")
+
+print(f"\nSaved: {OUTPUT_FILE}")

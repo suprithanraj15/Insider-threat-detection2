@@ -224,6 +224,21 @@ def evaluate_path_suspiciousness(file_path: str) -> tuple[float, list[str]]:
     return increment, reasons
 
 
+def _rule_description(rule_key: str) -> str:
+    """Human-readable description for each scoring rule component."""
+    descriptions = {
+        "base_lifecycle_signal": "Windows service lifecycle event detected (base signal).",
+        "correlated_lifecycle_modification": "Correlated service install and start-type change on same host within 5 minutes.",
+        "suspicious_service_path": "Service binary located in a user-writable or temporary directory.",
+        "non_system_service_account": "Service configured under a non-standard user account (not LocalSystem/LocalService/NetworkService).",
+        "auto_start_persistence": "Service configured for automatic start — possible persistence mechanism.",
+        "unusual_login_time": "Login recorded outside configured working hours (08:00–22:00).",
+        "failed_login_burst": "Multiple failed login attempts detected within a short time window.",
+        "device_activity": "Removable device activity detected.",
+    }
+    return descriptions.get(rule_key, rule_key.replace("_", " ").title())
+
+
 def score_event(event, correlated_events, extracted_evidence):
     """
     Score Windows System service lifecycle events.
@@ -244,6 +259,8 @@ def score_event(event, correlated_events, extracted_evidence):
             ),
             "recommended_action": None,
             "scoring_breakdown": {},
+            "triggered_rules": [],
+            "detection_source": "Live Windows Rule-Based Risk Engine",
         }
 
     category = event["event_category"]
@@ -251,6 +268,9 @@ def score_event(event, correlated_events, extracted_evidence):
     if category not in (
         "SERVICE_INSTALLED",
         "SERVICE_START_TYPE_CHANGED",
+        "LOGON_SUCCESS",
+        "LOGON_FAILURE",
+        "DEVICE_ACTIVITY",
     ):
         return {
             "assessment_status": "UNSCORED",
@@ -262,6 +282,97 @@ def score_event(event, correlated_events, extracted_evidence):
             ),
             "recommended_action": None,
             "scoring_breakdown": {},
+            "triggered_rules": [],
+            "detection_source": "Live Windows Rule-Based Risk Engine",
+        }
+
+    # --- LOGON_SUCCESS: unusual time detection ---
+    if category == "LOGON_SUCCESS":
+        hour = (
+            event["event_timestamp"].hour
+            if hasattr(event.get("event_timestamp"), "hour")
+            else None
+        )
+        if hour is None and isinstance(event.get("event_timestamp"), str):
+            try:
+                from datetime import datetime
+                hour = datetime.fromisoformat(event["event_timestamp"]).hour
+            except (ValueError, TypeError):
+                hour = None
+
+        if hour is not None and (hour >= 22 or hour < 6):
+            base_score = 20.0
+            breakdown = {"unusual_login_time": base_score}
+            total_score = base_score
+            triggered_rules = [{
+                "rule": "unusual_login_time",
+                "score": base_score,
+                "description": _rule_description("unusual_login_time"),
+            }]
+            return {
+                "assessment_status": "UNUSUAL_LOGIN_TIME",
+                "risk_score": round(total_score, 2),
+                "risk_level": "LOW",
+                "priority": "P3",
+                "scoring_reason": f"Login at {hour:02d}:xx is outside normal working hours (08:00–22:00). Requires review, not conclusive of malicious behaviour.",
+                "recommended_action": "Verify with the user whether the late-hours login was authorized.",
+                "scoring_breakdown": breakdown,
+                "triggered_rules": triggered_rules,
+                "detection_source": "Live Windows Rule-Based Risk Engine",
+            }
+        else:
+            return {
+                "assessment_status": "ROUTINE_LOGON",
+                "risk_score": None,
+                "risk_level": None,
+                "priority": None,
+                "scoring_reason": "Logon during normal working hours — no anomaly detected.",
+                "recommended_action": None,
+                "scoring_breakdown": {},
+                "triggered_rules": [],
+                "detection_source": "Live Windows Rule-Based Risk Engine",
+            }
+
+    # --- LOGON_FAILURE: failed login detection ---
+    if category == "LOGON_FAILURE":
+        base_score = 15.0
+        breakdown = {"failed_login_burst": base_score}
+        triggered_rules = [{
+            "rule": "failed_login_burst",
+            "score": base_score,
+            "description": _rule_description("failed_login_burst"),
+        }]
+        return {
+            "assessment_status": "FAILED_LOGIN_DETECTED",
+            "risk_score": round(base_score, 2),
+            "risk_level": "LOW",
+            "priority": "P3",
+            "scoring_reason": "Failed login attempt recorded. Single instance scored LOW. Multiple correlated failures would increase risk.",
+            "recommended_action": "Review for brute force patterns. Verify account lockout policy is in place.",
+            "scoring_breakdown": breakdown,
+            "triggered_rules": triggered_rules,
+            "detection_source": "Live Windows Rule-Based Risk Engine",
+        }
+
+    # --- DEVICE_ACTIVITY ---
+    if category == "DEVICE_ACTIVITY":
+        base_score = 25.0
+        breakdown = {"device_activity": base_score}
+        triggered_rules = [{
+            "rule": "device_activity",
+            "score": base_score,
+            "description": _rule_description("device_activity"),
+        }]
+        return {
+            "assessment_status": "DEVICE_ACTIVITY_DETECTED",
+            "risk_score": round(base_score, 2),
+            "risk_level": "MEDIUM",
+            "priority": "P2",
+            "scoring_reason": "Removable device activity detected. Context review required.",
+            "recommended_action": "Verify the device is an authorized peripheral. Check user policy compliance.",
+            "scoring_breakdown": breakdown,
+            "triggered_rules": triggered_rules,
+            "detection_source": "Live Windows Rule-Based Risk Engine",
         }
 
     # Base score for a service lifecycle event.
@@ -344,6 +455,12 @@ def score_event(event, correlated_events, extracted_evidence):
         status = "ROUTINE_MONITORING"
         action = "Continue routine security monitoring."
 
+    # Build triggered_rules list for attribution
+    triggered_rules = [
+        {"rule": k, "score": v, "description": _rule_description(k)}
+        for k, v in breakdown.items()
+    ]
+
     return {
         "assessment_status": status,
         "risk_score": round(total_score, 2),
@@ -352,6 +469,8 @@ def score_event(event, correlated_events, extracted_evidence):
         "scoring_reason": " ".join(reasons),
         "recommended_action": action,
         "scoring_breakdown": breakdown,
+        "triggered_rules": triggered_rules,
+        "detection_source": "Live Windows Rule-Based Risk Engine",
     }
 
 
@@ -496,6 +615,12 @@ def persist_alerts(conn, assessed_results):
             ],
             "scoring_breakdown": assessment.get(
                 "scoring_breakdown", {}
+            ),
+            "triggered_rules": assessment.get(
+                "triggered_rules", []
+            ),
+            "detection_source": assessment.get(
+                "detection_source", "Live Windows Rule-Based Risk Engine"
             ),
             "scoring_mode": "LIVE_WINDOWS_SERVICE_RULE",
             "multimodal_cert_agents": (

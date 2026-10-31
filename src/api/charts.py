@@ -278,3 +278,271 @@ def summary_stats():
         raise
     except psycopg.Error as exc:
         raise HTTPException(status_code=500, detail="Query error.") from exc
+
+
+@router.get("/live-stats")
+def live_stats():
+    """Comprehensive live Windows event statistics from actual DB records.
+    Used exclusively by the System Status page.
+    No historical CERT user-day data is included here."""
+    try:
+        with get_connection() as conn:
+            row = conn.execute("""
+                SELECT
+                    (SELECT count(*) FROM security_events) AS total_events,
+                    (SELECT count(*) FROM live_event_processing) AS processed,
+                    (SELECT count(*) FROM security_events) -
+                        (SELECT count(*) FROM live_event_processing) AS awaiting_processing,
+                    (SELECT count(*) FROM live_event_processing
+                        WHERE signal_status = 'REVIEW_SIGNAL') AS classified,
+                    (SELECT count(*) FROM live_event_processing
+                        WHERE signal_status = 'UNCLASSIFIED') AS unclassified,
+                    (SELECT count(*) FROM live_event_processing
+                        WHERE signal_status = 'REVIEW_SIGNAL') AS review_signals,
+                    (SELECT count(*) FROM live_event_assessments) AS assessed,
+                    (SELECT count(*) FROM live_event_assessments
+                        WHERE correlated_events::text != '[]') AS correlated,
+                    (SELECT count(*) FROM live_event_assessments
+                        WHERE risk_level = 'HIGH') AS assessed_high,
+                    (SELECT count(*) FROM live_event_assessments
+                        WHERE risk_level = 'MEDIUM') AS assessed_medium,
+                    (SELECT count(*) FROM live_event_assessments
+                        WHERE risk_level = 'LOW') AS assessed_low,
+                    (SELECT count(*) FROM security_alerts
+                        WHERE status = 'OPEN') AS open_alerts,
+                    (SELECT count(*) FROM security_alerts
+                        WHERE status = 'INVESTIGATING') AS investigating_alerts,
+                    (SELECT count(DISTINCT host_name) FROM security_events) AS unique_hosts,
+                    (SELECT max(event_timestamp) FROM security_events) AS last_event_time,
+                    (SELECT max(assessed_at) FROM live_event_assessments) AS last_assessment_time
+            """).fetchone()
+
+            total = row["total_events"] or 0
+            processed = row["processed"] or 0
+            awaiting = max(0, total - processed)
+
+        from datetime import datetime, timezone
+        return {
+            "total_events": total,
+            "processed": processed,
+            "awaiting_processing": awaiting,
+            "classified": row["classified"] or 0,
+            "unclassified": row["unclassified"] or 0,
+            "review_signals": row["review_signals"] or 0,
+            "assessed": row["assessed"] or 0,
+            "correlated": row["correlated"] or 0,
+            "assessed_high": row["assessed_high"] or 0,
+            "assessed_medium": row["assessed_medium"] or 0,
+            "assessed_low": row["assessed_low"] or 0,
+            "open_alerts": row["open_alerts"] or 0,
+            "investigating_alerts": row["investigating_alerts"] or 0,
+            "unique_hosts": row["unique_hosts"] or 0,
+            "last_event_time": row["last_event_time"].isoformat() if row["last_event_time"] else None,
+            "last_assessment_time": row["last_assessment_time"].isoformat() if row["last_assessment_time"] else None,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "data_source": "PostgreSQL live tables only — no historical CERT data",
+        }
+    except HTTPException:
+        raise
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=500, detail="Query error.") from exc
+
+
+@router.get("/live-timeline")
+def live_event_timeline(
+    limit: int = 100,
+    event_code: str = None,
+    host_name: str = None,
+    user_name: str = None,
+    category: str = None,
+    risk_level: str = None,
+):
+    """Paginated live event feed with processing and assessment data.
+    Supports filters by event_code, host_name, user_name, category, risk_level."""
+    from fastapi import Query as FQuery
+    conditions = ["1=1"]
+    params = []
+
+    if event_code:
+        conditions.append("e.event_code = %s")
+        params.append(event_code)
+    if host_name:
+        conditions.append("e.host_name ILIKE %s")
+        params.append(f"%{host_name}%")
+    if user_name:
+        conditions.append("e.user_name ILIKE %s")
+        params.append(f"%{user_name}%")
+    if category:
+        conditions.append("p.event_category = %s")
+        params.append(category)
+    if risk_level:
+        conditions.append("ass.risk_level = %s")
+        params.append(risk_level)
+
+    where = " AND ".join(conditions)
+    params.append(min(limit, 500))
+
+    sql = f"""
+        SELECT
+            e.event_id,
+            e.event_timestamp,
+            e.host_name,
+            e.user_name,
+            e.event_code,
+            e.event_source,
+            e.event_type,
+            p.event_category,
+            p.signal_status,
+            p.classification_reason,
+            ass.assessment_status,
+            ass.risk_score,
+            ass.risk_level,
+            ass.priority,
+            ass.scoring_reason,
+            ass.scoring_breakdown,
+            ass.extracted_evidence,
+            ass.correlated_events,
+            ass.scoring_mode,
+            ass.assessed_at
+        FROM security_events e
+        LEFT JOIN live_event_processing p ON p.event_id = e.event_id
+        LEFT JOIN live_event_assessments ass ON ass.event_id = e.event_id
+        WHERE {where}
+        ORDER BY e.event_timestamp DESC, e.event_id DESC
+        LIMIT %s
+    """
+
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        def fmt(r):
+            return {
+                "event_id": r["event_id"],
+                "event_timestamp": r["event_timestamp"].isoformat() if r["event_timestamp"] else None,
+                "host_name": r["host_name"],
+                "user_name": r["user_name"],
+                "event_code": r["event_code"],
+                "event_source": r["event_source"],
+                "event_type": r["event_type"],
+                "event_category": r["event_category"],
+                "signal_status": r["signal_status"],
+                "classification_reason": r["classification_reason"],
+                "assessment_status": r["assessment_status"],
+                "risk_score": round(float(r["risk_score"]), 1) if r["risk_score"] is not None else None,
+                "risk_level": r["risk_level"],
+                "priority": r["priority"],
+                "scoring_reason": r["scoring_reason"],
+                "scoring_breakdown": r["scoring_breakdown"],
+                "extracted_evidence": r["extracted_evidence"],
+                "correlated_events": r["correlated_events"],
+                "scoring_mode": r["scoring_mode"],
+                "assessed_at": r["assessed_at"].isoformat() if r["assessed_at"] else None,
+            }
+
+        return {
+            "count": len(rows),
+            "events": [fmt(r) for r in rows],
+            "data_source": "PostgreSQL live tables",
+        }
+    except HTTPException:
+        raise
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=500, detail="Query error.") from exc
+
+
+@router.get("/live-assessments")
+def live_assessments(limit: int = 50, risk_level: str = None):
+    """All live event assessments with detection attribution fields."""
+    conditions = ["1=1"]
+    params = []
+    if risk_level:
+        conditions.append("ass.risk_level = %s")
+        params.append(risk_level)
+    params.append(min(limit, 500))
+    where = " AND ".join(conditions)
+
+    sql = f"""
+        SELECT
+            ass.assessment_id,
+            ass.event_id,
+            ass.assessment_status,
+            ass.risk_score,
+            ass.risk_level,
+            ass.priority,
+            ass.scoring_reason,
+            ass.recommended_action,
+            ass.scoring_breakdown,
+            ass.extracted_evidence,
+            ass.correlated_events,
+            ass.scoring_mode,
+            ass.assessed_at,
+            e.host_name,
+            e.user_name,
+            e.event_code,
+            e.event_timestamp,
+            e.event_source,
+            p.event_category,
+            p.signal_status
+        FROM live_event_assessments ass
+        JOIN security_events e ON e.event_id = ass.event_id
+        LEFT JOIN live_event_processing p ON p.event_id = ass.event_id
+        WHERE {where}
+        ORDER BY ass.assessed_at DESC, ass.assessment_id DESC
+        LIMIT %s
+    """
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        def fmt(r):
+            bd = r["scoring_breakdown"] or {}
+            triggered = [
+                {"rule": k, "score": v, "description": _rule_description(k)}
+                for k, v in bd.items()
+            ]
+            return {
+                "assessment_id": r["assessment_id"],
+                "event_id": r["event_id"],
+                "assessment_status": r["assessment_status"],
+                "risk_score": round(float(r["risk_score"]), 1) if r["risk_score"] is not None else None,
+                "risk_level": r["risk_level"],
+                "priority": r["priority"],
+                "scoring_reason": r["scoring_reason"],
+                "recommended_action": r["recommended_action"],
+                "detection_source": "Live Windows Rule-Based Risk Engine",
+                "scoring_mode": r["scoring_mode"] or "LIVE_WINDOWS_SERVICE_RULE",
+                "triggered_rules": triggered,
+                "scoring_breakdown": bd,
+                "extracted_evidence": r["extracted_evidence"],
+                "correlated_events": r["correlated_events"],
+                "assessed_at": r["assessed_at"].isoformat() if r["assessed_at"] else None,
+                "host_name": r["host_name"],
+                "user_name": r["user_name"],
+                "event_code": r["event_code"],
+                "event_timestamp": r["event_timestamp"].isoformat() if r["event_timestamp"] else None,
+                "event_source": r["event_source"],
+                "event_category": r["event_category"],
+                "signal_status": r["signal_status"],
+            }
+
+        return {"count": len(rows), "assessments": [fmt(r) for r in rows]}
+    except HTTPException:
+        raise
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=500, detail="Query error.") from exc
+
+
+def _rule_description(rule_key: str) -> str:
+    descriptions = {
+        "base_lifecycle_signal": "Windows service lifecycle event detected (base signal).",
+        "correlated_lifecycle_modification": "Correlated service install and start-type change on same host within 5 minutes.",
+        "suspicious_service_path": "Service binary located in a user-writable or temporary directory.",
+        "non_system_service_account": "Service configured under a non-standard user account.",
+        "auto_start_persistence": "Service configured for automatic start — possible persistence mechanism.",
+        "unusual_login_time": "Login recorded outside configured working hours (08:00–22:00).",
+        "failed_login_burst": "Multiple failed login attempts detected within a short time window.",
+        "device_activity": "Removable device activity detected.",
+    }
+    return descriptions.get(rule_key, rule_key.replace("_", " ").title())
+
