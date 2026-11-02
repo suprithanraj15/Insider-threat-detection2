@@ -299,6 +299,7 @@ function App() {
     ["Threat Alerts", "🛡️"],
     ["User Intelligence", "👤"],
     ["Incident Management", "⚖️"],
+    ["Simulation Dashboard", "🧪"],
     ["Model Analytics", "🔬"],
     ["System Status", "⚙️"],
   ];
@@ -416,6 +417,8 @@ function App() {
         {page === "Incident Management" && (
           <IncidentManagementTab alerts={alerts} onRefresh={refresh} />
         )}
+
+        {page === "Simulation Dashboard" && <SimulationDashboardTab />}
 
         {page === "Model Analytics" && <ModelAnalyticsTab />}
 
@@ -764,6 +767,104 @@ function OverviewTab({ health, summary, riskCounts, historicalTotal, dbAlertCoun
 }
 
 /* ============================================================
+   HUMAN-READABLE ALERT EVIDENCE
+   ============================================================ */
+function AlertEvidenceDetails({ alert }) {
+  const evidence = alert?.agent_evidence && typeof alert.agent_evidence === "object"
+    ? alert.agent_evidence
+    : {};
+  const rules = Array.isArray(evidence.triggered_rules) ? evidence.triggered_rules : [];
+  const correlations = Array.isArray(evidence.correlated_events) ? evidence.correlated_events : [];
+  const scoring = evidence.scoring_breakdown && typeof evidence.scoring_breakdown === "object"
+    ? evidence.scoring_breakdown
+    : {};
+  const extracted = evidence.extracted_evidence && typeof evidence.extracted_evidence === "object"
+    ? evidence.extracted_evidence
+    : {};
+  const mapping = getEventAgentMapping(
+    evidence.source_event_code || alert?.event_code,
+    alert?.event_source || "",
+    evidence
+  );
+  const knownKeys = new Set([
+    "detection_source", "scoring_mode", "signal_status", "event_category",
+    "source_event_code", "triggered_rules", "correlated_events",
+    "scoring_breakdown", "extracted_evidence", "multimodal_cert_agents",
+  ]);
+  const additionalEvidence = Object.entries(evidence).filter(([key, value]) =>
+    !knownKeys.has(key) && value !== null && value !== undefined && value !== ""
+  );
+  const label = (value) => String(value ?? "—").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div className="evidence-box alert-evidence-readable">
+      <h4>Supporting Evidence</h4>
+
+      <section className="alert-evidence-section">
+        <h5>Detection context</h5>
+        <div className="incident-evidence-grid">
+          <div className="incident-evidence-field"><span>Detection source</span><strong>{evidence.detection_source || evidence.scoring_mode || "Not supplied"}</strong></div>
+          <div className="incident-evidence-field"><span>Detection engine</span><strong>{getActualDetectionEngine(evidence)}</strong></div>
+          <div className="incident-evidence-field"><span>Event category</span><strong>{label(evidence.event_category)}</strong></div>
+          <div className="incident-evidence-field"><span>Windows event code</span><strong>{evidence.source_event_code || alert?.event_code || "—"}</strong></div>
+          <div className="incident-evidence-field"><span>Signal status</span><strong>{label(evidence.signal_status)}</strong></div>
+          <div className="incident-evidence-field"><span>Agent / event domain</span><strong>{mapping.label}</strong></div>
+        </div>
+        <p className="alert-evidence-note">{mapping.basis}</p>
+      </section>
+
+      <section className="alert-evidence-section">
+        <h5>Triggered rules <span className="evidence-count">{rules.length}</span></h5>
+        {rules.length ? (
+          <div className="triggered-rule-list">
+            {rules.map((rule, index) => (
+              <div className="triggered-rule" key={`${rule.rule || "rule"}-${index}`}>
+                <div><strong>{label(rule.rule || `Rule ${index + 1}`)}</strong><p>{rule.description || "No rule description supplied."}</p></div>
+                <span>{Number(rule.score ?? 0) >= 0 ? "+" : ""}{Number(rule.score ?? 0).toFixed(1)}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p className="alert-evidence-empty">No triggered-rule details were supplied for this alert.</p>}
+      </section>
+
+      <div className="alert-evidence-two-column">
+        <section className="alert-evidence-section">
+          <h5>Scoring breakdown</h5>
+          {Object.keys(scoring).length ? <EvidenceValue value={scoring} /> : <p className="alert-evidence-empty">No scoring breakdown supplied.</p>}
+        </section>
+        <section className="alert-evidence-section">
+          <h5>Extracted event evidence</h5>
+          {Object.keys(extracted).length ? <EvidenceValue value={extracted} /> : <p className="alert-evidence-empty">No extracted event fields supplied.</p>}
+        </section>
+      </div>
+
+      <section className="alert-evidence-section">
+        <h5>Correlated events <span className="evidence-count">{correlations.length}</span></h5>
+        {correlations.length ? <EvidenceValue value={correlations} /> : <p className="alert-evidence-empty">No correlated events recorded.</p>}
+      </section>
+
+      {evidence.multimodal_cert_agents && (
+        <section className="alert-evidence-section">
+          <h5>Historical CERT agent availability</h5>
+          <p className="alert-evidence-note">{String(evidence.multimodal_cert_agents).replace(/_/g, " ")}</p>
+        </section>
+      )}
+
+      {additionalEvidence.length > 0 && (
+        <section className="alert-evidence-section">
+          <h5>Additional evidence</h5>
+          <div className="incident-evidence-grid">
+            {additionalEvidence.map(([key, value]) => (
+              <div className="incident-evidence-field" key={key}><span>{label(key)}</span><strong><EvidenceValue value={value} /></strong></div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    ALERT TABLE COMPONENT
    ============================================================ */
 function AlertTable({ alerts = [], onStatusUpdate }) {
@@ -835,13 +936,8 @@ function AlertTable({ alerts = [], onStatusUpdate }) {
                   >
                     {isExpanded ? "Hide" : "Evidence"}
                   </button>
-                  {isExpanded && a.agent_evidence && (
-                    <div className="evidence-box">
-                      <h4>Supporting Evidence</h4>
-                      <pre className="agent-json" style={{ maxHeight: "180px" }}>
-                        {JSON.stringify(a.agent_evidence, null, 2)}
-                      </pre>
-                    </div>
+                  {isExpanded && (
+                    <AlertEvidenceDetails alert={a} />
                   )}
                 </td>
               </tr>
@@ -1209,9 +1305,79 @@ function UserIntelligenceTab() {
 /* ============================================================
    TAB: INCIDENT MANAGEMENT
    ============================================================ */
+function getEventAgentMapping(eventCode, eventSource = "", evidence = {}) {
+  const code = String(eventCode ?? "");
+  const source = String(eventSource ?? "").toLowerCase();
+  const attachedAgentKeys = Object.keys(evidence || {}).filter((key) =>
+    /(rule|login|file|device|network).*agent|agent.*(rule|login|file|device|network)/i.test(key)
+  );
+  if (attachedAgentKeys.length) {
+    return {
+      label: attachedAgentKeys.map((key) => key.replace(/_/g, " ")).join(", "),
+      basis: "Agent-specific evidence is attached to this alert.",
+      verified: true,
+    };
+  }
+  if (["7045", "7040"].includes(code)) {
+    return { label: "Rule Agent", basis: "Service lifecycle / rule-based event domain. The recorded live detector is the Windows rule engine, not the historical CERT Rule Agent output.", verified: false };
+  }
+  if (["4624", "4625", "4768", "4769", "4771", "4776"].includes(code) || source.includes("logon") || source.includes("login")) {
+    return { label: "Login Agent", basis: "Login event-domain mapping only; it does not prove that the historical CERT Login Agent model ran for this alert.", verified: false };
+  }
+  if (["6416", "20001", "20003"].includes(code) || source.includes("device") || source.includes("usb")) {
+    return { label: "Device Agent", basis: "Device / removable-media event-domain mapping only; no separate CERT Device Agent output is attached.", verified: false };
+  }
+  if (["4663", "4656", "4660"].includes(code) || source.includes("file")) {
+    return { label: "File Agent", basis: "File activity event-domain mapping only; no separate CERT File Agent output is attached.", verified: false };
+  }
+  if (["5156", "5157", "5158"].includes(code) || source.includes("network") || source.includes("http") || source.includes("email")) {
+    return { label: "Network Agent", basis: "Network / HTTP / email event-domain mapping only; no separate CERT Network Agent output is attached.", verified: false };
+  }
+  return { label: "Not identified", basis: "The event record does not provide enough information to map it to a specific agent domain.", verified: false };
+}
+
+function getActualDetectionEngine(evidence = {}) {
+  const source = evidence.detection_source || evidence.scoring_mode || "";
+  if (String(source).includes("SIMULATION_USING_LIVE_RULE_ENGINE")) return "Live Windows Rule Engine (simulation)";
+  if (String(source).includes("LIVE_WINDOWS_SERVICE_RULE")) return "Live Windows Rule-Based Risk Engine";
+  return source || "Detection engine not specified in the alert record";
+}
+
+function EvidenceValue({ value }) {
+  if (value === null || value === undefined || value === "") return <span className="incident-muted">—</span>;
+  if (Array.isArray(value)) {
+    if (!value.length) return <span className="incident-muted">No records</span>;
+    return (
+      <div className="incident-evidence-list">
+        {value.map((item, index) => (
+          <div className="incident-evidence-list-item" key={index}>
+            {typeof item === "object" && item !== null ? <EvidenceValue value={item} /> : String(item)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    if (!entries.length) return <span className="incident-muted">No details available</span>;
+    return (
+      <div className="incident-evidence-grid">
+        {entries.map(([key, item]) => (
+          <div className="incident-evidence-field" key={key}>
+            <span>{key.replace(/_/g, " ")}</span>
+            <strong>{typeof item === "object" && item !== null ? <EvidenceValue value={item} /> : String(item ?? "—")}</strong>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <>{String(value)}</>;
+}
+
 function IncidentManagementTab({ alerts = [], onRefresh }) {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [updatingId, setUpdatingId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   const updateStatus = async (alertId, newStatus) => {
     setUpdatingId(alertId);
@@ -1238,138 +1404,457 @@ function IncidentManagementTab({ alerts = [], onRefresh }) {
   };
 
   const filtered = alerts.filter((a) => statusFilter === "ALL" || a.status === statusFilter);
+  const labelFor = (key) => String(key).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const agentKeyPattern = /(rule|login|file|device|network).*agent|agent.*(rule|login|file|device|network)/i;
 
   return (
-    <section className="agent-page">
-      <div className="status-banner">
+    <section className="agent-page incident-page">
+      <div className="status-banner incident-banner">
         <div>
           <strong>Incident Triage & Investigation Management</strong>
-          <p>SOC workflow for reviewing, investigating, resolving, or triaging security alerts in PostgreSQL.</p>
+          <p>Review detection context, inspect supporting evidence and manage the response lifecycle for each persisted alert.</p>
         </div>
         <span className="status-tag">ACTIVE WORKFLOW</span>
       </div>
 
       <div className="metrics-grid">
         <Metric label="Open Alerts" value={statusCounts.OPEN} note="Awaiting review" color="red" />
-        <Metric label="Investigating" value={statusCounts.INVESTIGATING} note="Assigned to SOC analyst" color="orange" />
-        <Metric label="Resolved" value={statusCounts.RESOLVED} note="Remediation completed" color="blue" />
-        <Metric label="False Positives" value={statusCounts.FALSE_POSITIVE} note="Verified benign activity" />
+        <Metric label="Investigating" value={statusCounts.INVESTIGATING} note="Under analyst review" color="orange" />
+        <Metric label="Resolved" value={statusCounts.RESOLVED} note="Marked resolved" color="blue" />
+        <Metric label="False Positives" value={statusCounts.FALSE_POSITIVE} note="Marked as benign" />
       </div>
 
-      {/* Status distribution donut */}
-      <article className="panel" style={{ display: "flex", gap: "28px", alignItems: "center" }}>
-        <DonutChart
-          size={110}
-          strokeWidth={20}
-          segments={[
-            { value: statusCounts.OPEN, color: "#ff6f8f" },
-            { value: statusCounts.INVESTIGATING, color: "#ffb45e" },
-            { value: statusCounts.RESOLVED, color: "#55d6ad" },
-            { value: statusCounts.FALSE_POSITIVE, color: "#858da8" },
-          ]}
-          label={alerts.length}
-          sublabel="Total"
-        />
-        <div style={{ flex: 1 }}>
-          {[
-            ["OPEN", "#ff6f8f"], ["INVESTIGATING", "#ffb45e"],
-            ["RESOLVED", "#55d6ad"], ["FALSE_POSITIVE", "#858da8"],
-          ].map(([st, color]) => (
-            <HorizontalBar
-              key={st}
-              label={st}
-              value={statusCounts[st]}
-              max={alerts.length || 1}
-              color={color}
-            />
+      <article className="panel incident-status-panel">
+        <div className="incident-status-chart">
+          <DonutChart
+            size={112}
+            strokeWidth={18}
+            segments={[
+              { value: statusCounts.OPEN, color: "#f06b83" },
+              { value: statusCounts.INVESTIGATING, color: "#e9a64d" },
+              { value: statusCounts.RESOLVED, color: "#42b99a" },
+              { value: statusCounts.FALSE_POSITIVE, color: "#8996aa" },
+            ]}
+            label={alerts.length}
+            sublabel="Incidents"
+          />
+        </div>
+        <div className="incident-status-bars">
+          {[ ["OPEN", "#f06b83"], ["INVESTIGATING", "#e9a64d"], ["RESOLVED", "#42b99a"], ["FALSE_POSITIVE", "#8996aa"] ].map(([st, color]) => (
+            <HorizontalBar key={st} label={labelFor(st)} value={statusCounts[st]} max={alerts.length || 1} color={color} />
           ))}
         </div>
       </article>
 
-      <div className="tab-filter-bar">
-        {["ALL", "OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"].map((st) => (
-          <button
-            key={st}
-            className={`filter-btn ${statusFilter === st ? "active" : ""}`}
-            onClick={() => setStatusFilter(st)}
-          >
-            {st} ({st === "ALL" ? alerts.length : statusCounts[st] ?? 0})
+      <div className="tab-filter-bar incident-filters">
+        { ["ALL", "OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"].map((st) => (
+          <button key={st} className={`filter-btn ${statusFilter === st ? "active" : ""}`} onClick={() => setStatusFilter(st)}>
+            {labelFor(st)} ({st === "ALL" ? alerts.length : statusCounts[st] ?? 0})
           </button>
-        ))}
+        )) }
       </div>
 
-      <article className="panel alerts-panel">
+      <article className="panel alerts-panel incident-queue-panel">
         <div className="panel-heading">
           <div>
-            <h2>Incident Triage Queue</h2>
-            <p>Directly modify incident status in PostgreSQL table security_alerts</p>
+            <h2>Incident Investigation Queue</h2>
+            <p>Select an incident to inspect its detection source, scoring evidence and related events.</p>
           </div>
+          <span className="pill">{filtered.length} MATCHED</span>
         </div>
 
         {filtered.length === 0 ? (
-          <div className="empty-state">
-            <span>✓</span>
-            <strong>No incidents in queue</strong>
-            <p>No alerts match the selected status filter.</p>
-          </div>
+          <div className="empty-state"><span>✓</span><strong>No incidents in queue</strong><p>No alerts match the selected status filter.</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Alert ID</th>
-                  <th>Detected</th>
-                  <th>User / Host</th>
-                  <th>Score</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Incident Explanation</th>
-                  <th>Investigation Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((a) => (
-                  <tr key={a.alert_id}>
-                    <td><strong>#{a.alert_id}</strong></td>
-                    <td>{a.detected_at ? new Date(a.detected_at).toLocaleString() : "—"}</td>
-                    <td><code>{a.user_name || "SYSTEM"}</code></td>
-                    <td><strong>{a.risk_score}</strong>/100</td>
-                    <td>
-                      <span className="badge" style={{ background: "#242738", color: "#c4b4ff" }}>
-                        {a.priority}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`badge ${String(a.status).toLowerCase()}`}>
-                        {a.status}
-                      </span>
-                    </td>
-                    <td style={{ maxWidth: "260px", whiteSpace: "normal" }}>
-                      <p style={{ margin: 0, fontSize: "11px" }}>{a.explanation}</p>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                        {a.status !== "INVESTIGATING" && (
-                          <button className="btn-sm btn-investigate" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "INVESTIGATING")}>Investigate</button>
-                        )}
-                        {a.status !== "RESOLVED" && (
-                          <button className="btn-sm btn-resolve" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "RESOLVED")}>Resolve</button>
-                        )}
-                        {a.status !== "FALSE_POSITIVE" && (
-                          <button className="btn-sm btn-fp" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "FALSE_POSITIVE")}>False Positive</button>
-                        )}
-                        {a.status !== "OPEN" && (
-                          <button className="btn-sm btn-reopen" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "OPEN")}>Reopen</button>
-                        )}
+          <div className="incident-list">
+            {filtered.map((a) => {
+              const evidence = a.agent_evidence && typeof a.agent_evidence === "object" ? a.agent_evidence : {};
+              const isExpanded = expandedId === a.alert_id;
+              const triggeredRules = Array.isArray(evidence.triggered_rules) ? evidence.triggered_rules : [];
+              const correlatedEvents = Array.isArray(evidence.correlated_events) ? evidence.correlated_events : [];
+              const scoring = evidence.scoring_breakdown && typeof evidence.scoring_breakdown === "object" ? evidence.scoring_breakdown : null;
+              const extracted = evidence.extracted_evidence && typeof evidence.extracted_evidence === "object" ? evidence.extracted_evidence : null;
+              const agentEntries = Object.entries(evidence).filter(([key, value]) => agentKeyPattern.test(key) && value !== null && value !== undefined);
+              const knownKeys = new Set(["triggered_rules", "correlated_events", "scoring_breakdown", "extracted_evidence", "detection_source", "scoring_mode", "signal_status", "event_category", "source_event_code", "multimodal_cert_agents"]);
+              const otherEvidence = Object.fromEntries(Object.entries(evidence).filter(([key]) => !knownKeys.has(key) && !agentKeyPattern.test(key)));
+              const score = Math.max(0, Math.min(100, Number(a.risk_score) || 0));
+              const severity = String(a.risk_level || "UNKNOWN").toLowerCase();
+
+              return (
+                <article className={`incident-card ${isExpanded ? "expanded" : ""}`} key={a.alert_id}>
+                  <div className="incident-card-main">
+                    <div className="incident-id-block">
+                      <span className="incident-id">INCIDENT #{a.alert_id}</span>
+                      <span className={`badge ${severity}`}>{a.risk_level || "UNKNOWN"}</span>
+                      <span className={`badge status-${String(a.status).toLowerCase()}`}>{labelFor(a.status || "UNKNOWN")}</span>
+                    </div>
+                    <div className="incident-summary-grid">
+                      <div className="incident-summary-primary">
+                        <h3>{evidence.event_category ? labelFor(evidence.event_category) : "Security alert"}</h3>
+                        <p>{a.explanation || "No explanation was supplied for this alert."}</p>
+                        <div className="incident-meta-line">
+                          <span><b>User</b> {a.user_name || "SYSTEM"}</span>
+                          <span><b>Event ID</b> {a.event_id ?? "—"}</span>
+                          <span><b>Detected</b> {a.detected_at ? new Date(a.detected_at).toLocaleString() : "—"}</span>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <div className="incident-risk-block">
+                        <div className="incident-risk-number"><strong>{score.toFixed(0)}</strong><span>/100</span></div>
+                        <div className="incident-risk-track"><span className={`risk-fill ${severity}`} style={{ width: `${score}%` }} /></div>
+                        <span className="incident-priority">Priority {a.priority || "—"}</span>
+                      </div>
+                    </div>
+                    <div className="incident-card-footer">
+                      <span className="incident-source-label">{evidence.detection_source || evidence.scoring_mode || "Detection source not provided"}</span>
+                      <button className="incident-details-btn" onClick={() => setExpandedId(isExpanded ? null : a.alert_id)} aria-expanded={isExpanded}>
+                        {isExpanded ? "Hide investigation details ↑" : "Investigate details ↓"}
+                      </button>
+                    </div>
+                    <div className="incident-actions">
+                      {a.status !== "INVESTIGATING" && <button className="btn-sm btn-investigate" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "INVESTIGATING")}>Investigate</button>}
+                      {a.status !== "RESOLVED" && <button className="btn-sm btn-resolve" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "RESOLVED")}>Resolve</button>}
+                      {a.status !== "FALSE_POSITIVE" && <button className="btn-sm btn-fp" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "FALSE_POSITIVE")}>False Positive</button>}
+                      {a.status !== "OPEN" && <button className="btn-sm btn-reopen" disabled={updatingId === a.alert_id} onClick={() => updateStatus(a.alert_id, "OPEN")}>Reopen</button>}
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="incident-investigation">
+                      <div className="investigation-heading"><div><span className="eyebrow">INVESTIGATION WORKSPACE</span><h3>Evidence & detection context</h3></div><span className="pill">ALERT #{a.alert_id}</span></div>
+                      <div className="investigation-grid">
+                        <section className="investigation-section">
+                          <h4>Detection source</h4>
+                          <p className="source-value">{evidence.detection_source || evidence.scoring_mode || "Not supplied by alert record"}</p>
+                          <div className="incident-evidence-field"><span>Signal status</span><strong>{evidence.signal_status || "—"}</strong></div>
+                          <div className="incident-evidence-field"><span>Event category</span><strong>{evidence.event_category || "—"}</strong></div>
+                          <div className="incident-evidence-field"><span>Source event code</span><strong>{evidence.source_event_code || "—"}</strong></div>
+                        </section>
+
+                        <section className="investigation-section">
+                          <h4>Risk assessment</h4>
+                          <div className="investigation-score"><strong>{score.toFixed(1)}</strong><span>/ 100 · {a.risk_level || "UNKNOWN"}</span></div>
+                          {scoring ? <EvidenceValue value={scoring} /> : <p className="incident-muted">No scoring breakdown was supplied.</p>}
+                        </section>
+
+                        <section className="investigation-section investigation-wide">
+                          <h4>Triggered rules <span>{triggeredRules.length}</span></h4>
+                          {triggeredRules.length ? (
+                            <div className="triggered-rule-list">
+                              {triggeredRules.map((rule, index) => (
+                                <div className="triggered-rule" key={`${rule.rule || "rule"}-${index}`}>
+                                  <div><strong>{rule.rule || `Rule ${index + 1}`}</strong><p>{rule.description || "No rule description supplied."}</p></div>
+                                  <span>+{Number(rule.score ?? 0).toFixed(1)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : <p className="incident-muted">No triggered-rule details were supplied.</p>}
+                        </section>
+
+                        <section className="investigation-section investigation-wide">
+                          <h4>Extracted event evidence</h4>
+                          {extracted ? <EvidenceValue value={extracted} /> : <p className="incident-muted">No extracted event fields were supplied.</p>}
+                        </section>
+
+                        <section className="investigation-section investigation-wide">
+                          <h4>Correlated events <span>{correlatedEvents.length}</span></h4>
+                          {correlatedEvents.length ? <EvidenceValue value={correlatedEvents} /> : <p className="incident-muted">No correlated events were attached to this alert.</p>}
+                        </section>
+
+                        <section className="investigation-section investigation-wide">
+                          <h4>Agent-specific evidence</h4>
+                          {(() => {
+                            const mapping = getEventAgentMapping(a.event_code || evidence.source_event_code, a.event_source || "", evidence);
+                            return (
+                              <div className="agent-attribution-grid">
+                                <div className="agent-evidence-card">
+                                  <div className="agent-attribution-title">
+                                    <h5>{mapping.label}</h5>
+                                    <span className={`badge ${mapping.verified ? "low" : "medium"}`}>{mapping.verified ? "EVIDENCE ATTACHED" : "FUNCTIONAL MAPPING"}</span>
+                                  </div>
+                                  <p>{mapping.basis}</p>
+                                </div>
+                                <div className="agent-evidence-card">
+                                  <h5>Actual detection engine</h5>
+                                  <p>{getActualDetectionEngine(evidence)}</p>
+                                  <p className="agent-attribution-note">A functional event-domain mapping is not proof that a separate historical CMU CERT agent model was executed.</p>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          {agentEntries.length > 0 && agentEntries.map(([key, value]) => (
+                            <div className="agent-evidence-card" key={key}><h5>Attached output · {labelFor(key)}</h5><EvidenceValue value={value} /></div>
+                          ))}
+                          {evidence.multimodal_cert_agents && (
+                            <div className="agent-availability-note">
+                              <strong>CERT agent availability</strong>
+                              <p>{evidence.multimodal_cert_agents}</p>
+                            </div>
+                          )}
+                        </section>
+
+                        {Object.keys(otherEvidence).length > 0 && (
+                          <section className="investigation-section investigation-wide">
+                            <h4>Additional recorded evidence</h4>
+                            <EvidenceValue value={otherEvidence} />
+                          </section>
+                        )}
+
+                        <section className="investigation-section investigation-wide recommendation-section">
+                          <h4>Recommended analyst action</h4>
+                          <p>{a.recommended_action || "No recommended action was supplied."}</p>
+                        </section>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
         )}
       </article>
+    </section>
+  );
+}
+
+/* ============================================================
+   TAB: SIMULATION DASHBOARD
+   ============================================================ */
+function SimulationDashboardTab() {
+  const [runs, setRuns] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [loadingRuns, setLoadingRuns] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [riskFilter, setRiskFilter] = useState("ALL");
+  const [scenarioKey, setScenarioKey] = useState("suspicious_service_install");
+  const [hostName, setHostName] = useState("MY-WINDOWS-PC");
+  const [userName, setUserName] = useState("test.user");
+
+  const scenarios = [
+    { key: "suspicious_service_install", name: "Suspicious Service Installation", level: "HIGH", description: "Suspicious service executable, user-writable path and non-standard account." },
+    { key: "correlated_service_persistence", name: "Correlated Service Persistence", level: "MEDIUM", description: "Service installation correlated with an automatic start-type change." },
+    { key: "unusual_hours_login", name: "Unusual Hours Login", level: "LOW", description: "Synthetic successful login at 02:15." },
+    { key: "removable_device", name: "Removable Device Recognition", level: "MEDIUM", description: "Synthetic external device recognition event." },
+    { key: "failed_login", name: "Failed Login Attempt", level: "LOW", description: "Single synthetic failed login attempt." },
+  ];
+
+  const loadRuns = async (preferredId = null) => {
+    setLoadingRuns(true);
+    setError("");
+    try {
+      const response = await fetch("/api/simulation/runs?limit=100");
+      if (!response.ok) throw new Error(`Could not load simulation history (HTTP ${response.status})`);
+      const data = await response.json();
+      const items = Array.isArray(data.runs) ? data.runs : [];
+      setRuns(items);
+      const nextId = preferredId ?? selectedId ?? items[0]?.simulation_id ?? null;
+      if (nextId && items.some((item) => Number(item.simulation_id) === Number(nextId))) setSelectedId(Number(nextId));
+      else if (items.length) setSelectedId(Number(items[0].simulation_id));
+      else { setSelectedId(null); setDetail(null); }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
+
+  useEffect(() => { loadRuns(); }, []);
+
+  useEffect(() => {
+    if (!selectedId) { setDetail(null); return; }
+    let cancelled = false;
+    const loadDetail = async () => {
+      setLoadingDetail(true);
+      try {
+        const response = await fetch(`/api/simulation/runs/${selectedId}`);
+        if (!response.ok) throw new Error(`Could not load simulation #${selectedId} (HTTP ${response.status})`);
+        const data = await response.json();
+        if (!cancelled) setDetail(data);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoadingDetail(false);
+      }
+    };
+    loadDetail();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  const runScenario = async (event) => {
+    event.preventDefault();
+    setRunning(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/simulation/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ scenario_key: scenarioKey, host_name: hostName.trim() || "SIMULATED-WINDOWS-HOST", user_name: userName.trim() || "simulated.user" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Simulation failed (HTTP ${response.status})`);
+      const matched = data.actual_result?.expected_result_matched;
+      setMessage(`Simulation #${data.simulation_id} ${data.status}. Expected ${data.expected_result}; actual ${data.actual_result?.actual_risk_levels?.join(", ") || "not classified"}. ${matched ? "Expected result matched." : "Expected result did not match."}`);
+      await loadRuns(data.simulation_id);
+      setSelectedId(Number(data.simulation_id));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const visibleRuns = runs.filter((run) => {
+    if (riskFilter === "ALL") return true;
+    const levels = run.actual_result?.actual_risk_levels || [];
+    const expected = run.expected_result?.expected_risk_level || run.expected_result;
+    return levels.includes(riskFilter) || expected === riskFilter;
+  });
+  const totalEvents = runs.reduce((sum, run) => sum + Number(run.actual_result?.events_generated || 0), 0);
+  const passedRuns = runs.filter((run) => run.actual_result?.expected_result_matched === true).length;
+  const highRuns = runs.filter((run) => (run.actual_result?.actual_risk_levels || []).includes("HIGH")).length;
+  const mediumRuns = runs.filter((run) => (run.actual_result?.actual_risk_levels || []).includes("MEDIUM")).length;
+  const lowRuns = runs.filter((run) => (run.actual_result?.actual_risk_levels || []).includes("LOW")).length;
+  const events = detail?.events || [];
+  const simulation = detail?.simulation || {};
+  const levelClass = (level) => String(level || "unknown").toLowerCase();
+  const labelFor = (value) => String(value ?? "—").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const formatDate = (value) => value ? new Date(value).toLocaleString() : "—";
+
+  return (
+    <section className="agent-page simulation-page">
+      <div className="status-banner simulation-banner">
+        <div>
+          <strong>Attack Simulation & Validation</strong>
+          <p>Run safe synthetic Windows-event scenarios, review risk classifications and inspect the evidence produced by the live rule engine. Simulation records remain separate from real security incidents.</p>
+        </div>
+        <span className="status-tag">SYNTHETIC TEST ENVIRONMENT</span>
+      </div>
+
+      {error && <div className="notice warning"><strong>Simulation API issue</strong><p>{error}</p></div>}
+      {message && <div className="notice info">{message}</div>}
+
+      <div className="metrics-grid">
+        <Metric label="Simulation Runs" value={runs.length} note="Stored test executions" color="blue" />
+        <Metric label="Expected Results Matched" value={`${passedRuns}/${runs.length}`} note="Completed runs with matching classifications" color="blue" />
+        <Metric label="Synthetic Events" value={totalEvents} note="Events generated across loaded runs" color="orange" />
+        <Metric label="Risk-Level Coverage" value={`${[highRuns > 0, mediumRuns > 0, lowRuns > 0].filter(Boolean).length}/3`} note={`HIGH ${highRuns} · MEDIUM ${mediumRuns} · LOW ${lowRuns}`} color="red" />
+      </div>
+
+      <article className="panel simulation-launch-panel">
+        <div className="panel-heading">
+          <div><h2>Run a simulation scenario</h2><p>Uses the existing POST /api/simulation/run endpoint. Events are synthetic and are not inserted into the live security event or alert tables.</p></div>
+          <span className="pill">SAFE SIMULATION</span>
+        </div>
+        <form className="simulation-form" onSubmit={runScenario}>
+          <label>Scenario
+            <select value={scenarioKey} onChange={(e) => setScenarioKey(e.target.value)}>
+              {scenarios.map((scenario) => <option key={scenario.key} value={scenario.key}>{scenario.name} · Expected {scenario.level}</option>)}
+            </select>
+          </label>
+          <label>Host name
+            <input value={hostName} onChange={(e) => setHostName(e.target.value)} placeholder="MY-WINDOWS-PC" />
+          </label>
+          <label>User name
+            <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="test.user" />
+          </label>
+          <button className="refresh-button simulation-run-button" type="submit" disabled={running}>{running ? "Running scenario…" : "▶ Run simulation"}</button>
+        </form>
+        <p className="simulation-scenario-note">{scenarios.find((scenario) => scenario.key === scenarioKey)?.description}</p>
+      </article>
+
+      <article className="panel simulation-history-panel">
+        <div className="panel-heading">
+          <div><h2>Simulation history</h2><p>Select a run to inspect its event-level detection evidence.</p></div>
+          <div className="simulation-history-actions">
+            <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} aria-label="Filter simulations by risk level">
+              <option value="ALL">All risk levels</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option>
+            </select>
+            <button className="refresh-button" onClick={() => loadRuns()} disabled={loadingRuns}>{loadingRuns ? "Refreshing…" : "↻ Refresh history"}</button>
+          </div>
+        </div>
+        {loadingRuns ? <p className="muted">Loading simulation runs…</p> : visibleRuns.length === 0 ? (
+          <div className="empty-state"><span>i</span><strong>No simulation runs found</strong><p>Run a scenario above or change the risk filter.</p></div>
+        ) : (
+          <div className="simulation-run-list">
+            {visibleRuns.map((run) => {
+              const expected = run.expected_result?.expected_risk_level || run.expected_result || "—";
+              const actualLevels = run.actual_result?.actual_risk_levels || [];
+              const actual = [...new Set(actualLevels)].join(", ") || "—";
+              const matched = run.actual_result?.expected_result_matched === true;
+              return (
+                <button type="button" key={run.simulation_id} className={`simulation-run-row ${Number(selectedId) === Number(run.simulation_id) ? "selected" : ""}`} onClick={() => setSelectedId(Number(run.simulation_id))}>
+                  <span className="simulation-run-id">#{run.simulation_id}</span>
+                  <span className="simulation-run-info"><strong>{run.scenario_name || labelFor(run.scenario_key)}</strong><small>{run.host_name || "—"} · {run.user_name || "—"} · {formatDate(run.started_at)}</small></span>
+                  <span className={`badge ${levelClass(actualLevels[0] || expected)}`}>{actual}</span>
+                  <span className={`simulation-match ${matched ? "matched" : "mismatch"}`}>{matched ? "✓ MATCH" : "✕ MISMATCH"}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </article>
+
+      <article className="panel simulation-detail-panel">
+        <div className="panel-heading">
+          <div><h2>Run investigation</h2><p>{simulation.simulation_id ? `Simulation #${simulation.simulation_id} · ${simulation.scenario_name || "Scenario"}` : "Detailed event-level evidence"}</p></div>
+          {simulation.status && <span className={`badge ${simulation.status === "COMPLETED" ? "low" : "medium"}`}>{simulation.status}</span>}
+        </div>
+        {loadingDetail ? <p className="muted">Loading run details…</p> : !simulation.simulation_id ? (
+          <div className="empty-state"><span>↗</span><strong>Select a simulation run</strong><p>Risk scores, triggered rules, extracted evidence and correlations will appear here.</p></div>
+        ) : (
+          <>
+            <div className="simulation-run-summary">
+              <div><span>Expected risk</span><strong>{simulation.expected_result?.expected_risk_level || "—"}</strong></div>
+              <div><span>Events generated</span><strong>{simulation.actual_result?.events_generated ?? events.length}</strong></div>
+              <div><span>Events detected</span><strong>{simulation.actual_result?.events_detected ?? 0}</strong></div>
+              <div><span>Result validation</span><strong className={simulation.actual_result?.expected_result_matched ? "text-success" : "text-warning"}>{simulation.actual_result?.expected_result_matched ? "MATCHED" : "NOT MATCHED"}</strong></div>
+            </div>
+            <div className="simulation-event-list">
+              {events.map((event) => {
+                const evidence = event.detection_evidence || {};
+                const mapping = getEventAgentMapping(event.event_code, event.event_source, evidence);
+                const score = Math.max(0, Math.min(100, Number(event.detected_risk_score) || 0));
+                const rules = evidence.triggered_rules || [];
+                const breakdown = evidence.scoring_breakdown || {};
+                const extracted = evidence.extracted_evidence || {};
+                const correlations = evidence.correlated_events || [];
+                return (
+                  <section className="simulation-event-card" key={event.sim_event_id}>
+                    <div className="simulation-event-heading">
+                      <div><span className="simulation-event-code">WINDOWS EVENT {event.event_code}</span><h3>{event.event_source || event.event_type}</h3><p>{event.host_name} · {event.user_name} · {formatDate(event.event_timestamp)}</p></div>
+                      <div className="simulation-event-risk"><strong>{score}</strong><span>/100</span><span className={`badge ${levelClass(event.detected_risk_level)}`}>{event.detected_risk_level || "UNKNOWN"}</span></div>
+                    </div>
+                    <div className="simulation-score-track"><span className={`risk-fill ${levelClass(event.detected_risk_level)}`} style={{ width: `${score}%` }} /></div>
+                    <div className="simulation-evidence-grid">
+                      <div className="simulation-evidence-block"><h4>Agent / event-domain mapping</h4><strong>{mapping.label}</strong><p>{mapping.basis}</p></div>
+                      <div className="simulation-evidence-block"><h4>Actual detection engine</h4><strong>{getActualDetectionEngine(evidence)}</strong><p>{evidence.assessment_status || "Assessment status not supplied"}</p></div>
+                      <div className="simulation-evidence-block simulation-evidence-wide"><h4>Detection explanation</h4><p>{evidence.scoring_reason || "No scoring explanation supplied."}</p></div>
+                      <div className="simulation-evidence-block simulation-evidence-wide"><h4>Triggered rules <span>{rules.length}</span></h4>
+                        {rules.length ? <div className="simulation-rule-list">{rules.map((rule, index) => <div className="simulation-rule-row" key={`${rule.rule}-${index}`}><div><strong>{labelFor(rule.rule)}</strong><p>{rule.description}</p></div><b>+{Number(rule.score || 0)}</b></div>)}</div> : <p>No triggered-rule details supplied.</p>}
+                      </div>
+                      <div className="simulation-evidence-block"><h4>Scoring breakdown</h4>
+                        {Object.keys(breakdown).length ? <div className="simulation-breakdown-list">{Object.entries(breakdown).map(([key, value]) => <div key={key}><span>{labelFor(key)}</span><strong>+{value}</strong></div>)}</div> : <p>No scoring breakdown supplied.</p>}
+                      </div>
+                      <div className="simulation-evidence-block"><h4>Extracted evidence</h4>
+                        {Object.keys(extracted).length ? <EvidenceValue value={extracted} /> : <p>No extracted fields supplied for this event.</p>}
+                      </div>
+                      <div className="simulation-evidence-block simulation-evidence-wide"><h4>Correlated events <span>{correlations.length}</span></h4>
+                        {correlations.length ? <EvidenceValue value={correlations} /> : <p>No correlated events recorded for this event.</p>}
+                      </div>
+                      <div className="simulation-evidence-block simulation-evidence-wide"><h4>Raw event message</h4><pre className="simulation-raw-message">{event.details?.message || "No event message supplied."}</pre></div>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </article>
+      <p className="simulation-footnote">Simulation data is stored in simulation_runs / sim_events. These synthetic events are not live security_events and are not added to the Incident Management queue.</p>
     </section>
   );
 }

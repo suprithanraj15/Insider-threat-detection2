@@ -12,13 +12,11 @@ def extract_service_evidence(message: str) -> dict:
     """
 
     text = (message or "").replace("\r\n", "\n").replace("\r", "\n")
-
     evidence = {}
 
-    # Extract service installation fields.
     field_patterns = {
         "service_name": r"^\s*Service Name:\s*(.*?)\s*$",
-        "service_file_name": r'^\s*Service File Name:\s*(.*?)\s*$',
+        "service_file_name": r"^\s*Service File Name:\s*(.*?)\s*$",
         "service_type": r"^\s*Service Type:\s*(.*?)\s*$",
         "service_start_type": r"^\s*Service Start Type:\s*(.*?)\s*$",
         "service_account": r"^\s*Service Account:\s*(.*?)\s*$",
@@ -33,11 +31,9 @@ def extract_service_evidence(message: str) -> dict:
 
         if match:
             value = match.group(1).strip().strip('"')
-
             if value:
                 evidence[field] = value
 
-    # Extract service start-type modification details.
     start_type_pattern = (
         r"The start type of the\s+(.+?)\s+service was changed "
         r"from\s+(.+?)\s+to\s+(.+?)(?:\.|$)"
@@ -55,5 +51,3 @@ def extract_service_evidence(message: str) -> dict:
         evidence["new_start_type"] = start_type_change.group(3).strip()
 
     return evidence
-
- 

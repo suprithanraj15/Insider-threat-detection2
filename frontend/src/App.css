@@ -444,3 +444,250 @@ footer {
   .agent-grid { grid-template-columns: 1fr; }
   .donut-layout { flex-direction: column; }
 }
+
+
+/* ============================================================
+   REFINED SLATE-NAVY THEME + INCIDENT INVESTIGATION WORKSPACE
+   Appended overrides preserve existing component structure.
+   ============================================================ */
+:root {
+  color: #edf2fb;
+  background: #151c2b;
+}
+body { background: #151c2b; color: #edf2fb; }
+.app-shell { background: #151c2b; }
+.sidebar { background: #121a29; border-right-color: #2a374b; }
+.main-content { background: #151c2b; }
+.metric, .panel { background: #202b3d; border-color: #35445b; box-shadow: 0 8px 24px #080e1a24; }
+.panel { color: #edf2fb; }
+.metric p, .panel-heading p, .topbar p, .status-banner p { color: #afbdd1; }
+.metric small, .muted, .eyebrow, .nav-label { color: #a0aec3; }
+.brand small { color: #9ba9bf; }
+.nav-item { color: #b8c5d8; }
+.nav-item:hover { background: #27354a; color: #fff; }
+.nav-item.active { background: #342d56; color: #fff; box-shadow: inset 3px 0 #a895ff; }
+.sidebar-stats, .sidebar-bottom { border-color: #35445b; background: #1b2637; }
+.sidebar-stat-row span, .sidebar-bottom small { color: #aab8cc; }
+.status-banner { background: linear-gradient(110deg, #2b3150, #202b3d); border-color: #4b5277; }
+.status-tag, .pill { background: #3b355d; color: #ded5ff; }
+.metric-icon { background: #3a3458; color: #c6b9ff; }
+.metric-icon.red { background: #4b2c3a; color: #ff9eae; }
+.metric-icon.orange { background: #4a3928; color: #ffd08c; }
+.metric-icon.blue { background: #29415b; color: #9bcaff; }
+.sidebar-bottom, .sidebar-stats { color: #eaf0fa; }
+th { background: #263348; color: #d4deed; border-bottom-color: #3b4b63; }
+td { border-bottom-color: #344258; color: #e1e8f3; }
+tbody tr:hover { background: #29374b; }
+.table-wrap { border-radius: 9px; }
+.filter-btn, .search-input { background: #29364a; border-color: #43536b; color: #d2dceb; }
+.filter-btn:hover { border-color: #8c7bd0; color: #fff; }
+.filter-btn.active { background: #6554a6; border-color: #9c8be0; color: #fff; }
+.btn-investigate { background: #594326; color: #ffdaa2; border-color: #8c6938; }
+.btn-resolve { background: #21483f; color: #9ce5cf; border-color: #367663; }
+.btn-fp { background: #354156; color: #d2dceb; border-color: #53627a; }
+.btn-reopen { background: #403765; color: #d6caff; border-color: #6a5a9e; }
+.evidence-box, .agent-json { background: #182333; border-color: #3b4b63; color: #d2dceb; }
+.system-row { border-bottom-color: #344258; }
+.system-row > span { color: #b3c0d2; }
+.h-bar-track, .progress-track { background: #35445a; }
+.bar-label, .chart-x-labels { color: #9eacc1; }
+.notice.info { background: #292747; border-color: #5a5285; color: #e0d8ff; }
+.notice.warning { background: #3c3022; border-color: #80613b; color: #ffdaa2; }
+.empty-state { color: #c4cfdf; }
+.empty-state strong { color: #f0f4fb; }
+.empty-state p { color: #aebbd0; }
+
+/* Incident queue */
+.incident-page { gap: 16px; }
+.incident-banner { margin-bottom: 0; }
+.incident-status-panel { display: flex; align-items: center; gap: 28px; }
+.incident-status-chart { flex: 0 0 auto; }
+.incident-status-bars { flex: 1; min-width: 0; }
+.incident-filters { margin: 2px 0 0; }
+.incident-queue-panel { padding: 22px; }
+.incident-list { display: grid; gap: 13px; }
+.incident-card { border: 1px solid #3b4b63; border-radius: 12px; overflow: hidden; background: #1b2738; }
+.incident-card.expanded { border-color: #8274c2; box-shadow: 0 0 0 1px #8274c233; }
+.incident-card-main { padding: 17px 18px 14px; }
+.incident-id-block { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.incident-id { color: #aebbd0; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+.incident-summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) 145px; gap: 22px; align-items: center; }
+.incident-summary-primary h3 { margin: 0 0 7px; color: #f1f5fb; font-size: 15px; letter-spacing: -.2px; }
+.incident-summary-primary p { margin: 0; color: #c0ccdc; font-size: 12px; line-height: 1.65; }
+.incident-meta-line { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; color: #b3c0d2; font-size: 10px; }
+.incident-meta-line b { color: #e3eaf5; margin-right: 4px; }
+.incident-risk-block { padding: 11px 12px; border: 1px solid #3d4c63; border-radius: 9px; background: #243247; }
+.incident-risk-number { display: flex; align-items: baseline; gap: 4px; }
+.incident-risk-number strong { color: #f5f7fc; font-size: 28px; line-height: 1; }
+.incident-risk-number span { color: #aebbd0; font-size: 11px; }
+.incident-risk-track { height: 7px; border-radius: 9px; background: #3b4a60; overflow: hidden; margin: 11px 0 7px; }
+.risk-fill { display: block; height: 100%; border-radius: inherit; background: #42b99a; }
+.risk-fill.medium { background: linear-gradient(90deg, #bd7b36, #edb15d); }
+.risk-fill.high { background: linear-gradient(90deg, #c24f68, #f0788d); }
+.risk-fill.low { background: linear-gradient(90deg, #268b76, #4cc5a4); }
+.incident-priority { color: #b7c4d7; font-size: 10px; }
+.incident-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 11px; border-top: 1px solid #35445a; }
+.incident-source-label { color: #b9aaff; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
+.incident-details-btn { border: 1px solid #665b99; border-radius: 7px; background: #373257; color: #e1d9ff; padding: 7px 11px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.incident-details-btn:hover { background: #49416f; }
+.incident-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.incident-actions .btn-sm { margin-right: 0; }
+.incident-investigation { padding: 18px; border-top: 1px solid #3b4b63; background: #172334; }
+.investigation-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; }
+.investigation-heading h3 { margin: 5px 0 0; color: #f1f5fb; font-size: 16px; }
+.investigation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.investigation-section { min-width: 0; padding: 14px; border: 1px solid #35465d; border-radius: 9px; background: #202e42; }
+.investigation-section h4 { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 12px; color: #d9d1ff; font-size: 11px; letter-spacing: .35px; text-transform: uppercase; }
+.investigation-section h4 span { display: inline-grid; place-items: center; min-width: 21px; height: 21px; border-radius: 12px; background: #3b4260; color: #e4e8f4; font-size: 10px; }
+.investigation-section p { margin: 0; color: #c4cfdf; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.investigation-section .source-value { margin-bottom: 11px; color: #f0edff; font-weight: 700; }
+.investigation-wide { grid-column: 1 / -1; }
+.investigation-score { display: flex; align-items: baseline; gap: 7px; margin-bottom: 12px; color: #c0ccdc; font-size: 10px; }
+.investigation-score strong { color: #fff; font-size: 25px; }
+.incident-evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.incident-evidence-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px 9px; border-radius: 6px; background: #29384d; }
+.incident-evidence-field > span { color: #aebbd0; font-size: 9px; text-transform: capitalize; }
+.incident-evidence-field > strong { color: #edf2fb; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
+.incident-evidence-list { display: grid; gap: 7px; }
+.incident-evidence-list-item { padding: 9px; border: 1px solid #3a4b63; border-radius: 7px; color: #dbe4f1; font-size: 10px; overflow-wrap: anywhere; }
+.triggered-rule-list { display: grid; gap: 8px; }
+.triggered-rule { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 10px 11px; border: 1px solid #3a4b63; border-radius: 7px; background: #29384d; }
+.triggered-rule strong { color: #f1f4fb; font-size: 11px; }
+.triggered-rule p { margin-top: 4px; }
+.triggered-rule > span { flex: 0 0 auto; color: #ffd08c; font-size: 11px; font-weight: 800; }
+.agent-evidence-card { padding: 11px; margin-top: 8px; border: 1px solid #43536b; border-radius: 8px; background: #29384d; }
+.agent-evidence-card h5 { margin: 0 0 9px; color: #cbbfff; font-size: 11px; }
+.agent-availability-note { padding: 11px; border: 1px dashed #61718a; border-radius: 8px; }
+.agent-availability-note strong { display: block; margin-bottom: 5px; color: #e7edf7; font-size: 11px; }
+.agent-availability-note p, .incident-muted { color: #aebbd0 !important; font-size: 10px !important; }
+.recommendation-section { border-color: #65598e; background: #292844; }
+.status-open { background: #4b2c3a; color: #ffb1bf; }
+.status-investigating { background: #4a3928; color: #ffd08c; }
+.status-resolved { background: #21483f; color: #9ce5cf; }
+.status-false_positive { background: #354156; color: #d2dceb; }
+
+@media (max-width: 760px) {
+  .incident-status-panel { align-items: flex-start; gap: 14px; }
+  .incident-summary-grid { grid-template-columns: 1fr; }
+  .incident-risk-block { max-width: 220px; }
+  .investigation-grid { grid-template-columns: 1fr; }
+  .investigation-wide { grid-column: auto; }
+  .incident-card-footer { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 520px) {
+  .incident-status-panel { flex-direction: column; }
+  .incident-evidence-grid { grid-template-columns: 1fr; }
+  .incident-card-main, .incident-investigation { padding: 13px; }
+}
+
+/* ============================================================
+   SIMULATION DASHBOARD + AGENT ATTRIBUTION
+   ============================================================ */
+.simulation-page { gap: 16px; }
+.simulation-banner { margin-bottom: 0; }
+.simulation-launch-panel, .simulation-history-panel, .simulation-detail-panel { min-width: 0; }
+.simulation-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.simulation-form label { display: grid; gap: 7px; color: #c4cfdf; font-size: 10px; font-weight: 700; }
+.simulation-form input, .simulation-form select, .simulation-history-actions select {
+  width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid #43536b;
+  border-radius: 7px; background: #29364a; color: #edf2fb; font: inherit; font-size: 11px;
+}
+.simulation-form input:focus, .simulation-form select:focus, .simulation-history-actions select:focus { outline: 2px solid #8c7bd0; outline-offset: 1px; }
+.simulation-run-button { min-height: 38px; white-space: nowrap; }
+.simulation-scenario-note { margin: 12px 0 0; color: #aebbd0; font-size: 10px; line-height: 1.5; }
+.simulation-history-actions { display: flex; align-items: center; gap: 8px; }
+.simulation-history-actions select { width: auto; min-width: 130px; }
+.simulation-run-list { display: grid; gap: 8px; }
+.simulation-run-row {
+  width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 12px; border: 1px solid #3a4b63; border-radius: 8px; background: #1b293b; color: #e8eef8; text-align: left;
+}
+.simulation-run-row:hover, .simulation-run-row.selected { border-color: #8c7bd0; background: #29364d; }
+.simulation-run-id { color: #bbaeff; font-size: 11px; font-weight: 800; }
+.simulation-run-info { display: grid; gap: 4px; min-width: 0; }
+.simulation-run-info strong { font-size: 11px; }
+.simulation-run-info small { color: #aebbd0; font-size: 9px; overflow-wrap: anywhere; }
+.simulation-match { font-size: 9px; font-weight: 800; white-space: nowrap; }
+.simulation-match.matched, .text-success { color: #79d9b9; }
+.simulation-match.mismatch, .text-warning { color: #ffd08c; }
+.simulation-run-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-bottom: 14px; }
+.simulation-run-summary > div { display: grid; gap: 6px; padding: 11px; border: 1px solid #3a4b63; border-radius: 8px; background: #253449; }
+.simulation-run-summary span { color: #aebbd0; font-size: 9px; }
+.simulation-run-summary strong { color: #f0f4fb; font-size: 13px; }
+.simulation-event-list { display: grid; gap: 13px; }
+.simulation-event-card { padding: 15px; border: 1px solid #3b4b63; border-radius: 10px; background: #192638; }
+.simulation-event-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.simulation-event-code { color: #b9aaff; font-size: 9px; font-weight: 800; letter-spacing: .8px; }
+.simulation-event-heading h3 { margin: 5px 0; color: #f1f5fb; font-size: 13px; }
+.simulation-event-heading p { margin: 0; color: #aebbd0; font-size: 10px; }
+.simulation-event-risk { display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.simulation-event-risk strong { color: #fff; font-size: 25px; }
+.simulation-event-risk > span:not(.badge) { color: #aebbd0; font-size: 10px; }
+.simulation-score-track { height: 7px; margin: 12px 0; overflow: hidden; border-radius: 9px; background: #35445a; }
+.simulation-score-track .risk-fill { display: block; height: 100%; }
+.simulation-evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.simulation-evidence-block { min-width: 0; padding: 11px; border: 1px solid #3a4b63; border-radius: 8px; background: #243348; }
+.simulation-evidence-wide { grid-column: 1 / -1; }
+.simulation-evidence-block h4 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 9px; color: #d9d1ff; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+.simulation-evidence-block h4 span { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 12px; background: #3b4260; color: #edf2fb; }
+.simulation-evidence-block > strong { display: block; margin-bottom: 5px; color: #f0edff; font-size: 11px; }
+.simulation-evidence-block p { margin: 0; color: #b9c6d8; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.simulation-rule-list, .simulation-breakdown-list { display: grid; gap: 7px; }
+.simulation-rule-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 9px; border: 1px solid #40516a; border-radius: 7px; background: #2a3a50; }
+.simulation-rule-row strong { color: #f0f4fb; font-size: 10px; }
+.simulation-rule-row p { margin-top: 4px; }
+.simulation-rule-row > b { flex: 0 0 auto; color: #ffd08c; font-size: 10px; }
+.simulation-breakdown-list > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #3a4b63; font-size: 10px; }
+.simulation-breakdown-list > div:last-child { border-bottom: 0; }
+.simulation-breakdown-list span { color: #b9c6d8; }
+.simulation-breakdown-list strong { color: #f0f4fb; }
+.simulation-raw-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #d1dbea; font: 10px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.simulation-footnote { margin: 0; color: #aebbd0; font-size: 10px; line-height: 1.6; }
+.agent-attribution-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.agent-attribution-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.agent-attribution-title h5 { margin: 0; }
+.agent-attribution-note { margin-top: 7px !important; color: #9eacc1 !important; font-size: 9px !important; }
+.agent-evidence-card > p { color: #c0ccdc; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) {
+  .simulation-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .simulation-run-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .simulation-history-actions { align-items: stretch; flex-direction: column; width: 100%; }
+  .simulation-history-actions select { width: 100%; }
+  .simulation-run-row { grid-template-columns: 42px minmax(0, 1fr); }
+  .simulation-run-row > .badge, .simulation-run-row > .simulation-match { grid-column: 2; justify-self: start; }
+  .simulation-evidence-grid, .agent-attribution-grid { grid-template-columns: 1fr; }
+  .simulation-evidence-wide { grid-column: auto; }
+}
+@media (max-width: 520px) {
+  .simulation-form, .simulation-run-summary { grid-template-columns: 1fr; }
+  .simulation-event-heading { flex-direction: column; }
+  .simulation-event-risk { justify-content: flex-start; }
+}
+
+/* ============================================================
+   HUMAN-READABLE ALERT EVIDENCE (Overview / Threat Alerts)
+   ============================================================ */
+.alert-evidence-readable { width: min(520px, 100%); max-width: 100%; box-sizing: border-box; }
+.alert-evidence-section { min-width: 0; margin-top: 12px; padding: 10px; border: 1px solid #3a4b63; border-radius: 8px; background: #202e42; }
+.alert-evidence-section h5 { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; color: #d9d1ff; font-size: 10px; letter-spacing: .35px; text-transform: uppercase; }
+.evidence-count { display: inline-grid; place-items: center; min-width: 19px; height: 19px; padding: 0 4px; border-radius: 12px; background: #3b4260; color: #edf2fb; font-size: 9px; }
+.alert-evidence-note { margin: 8px 0 0; color: #aebbd0; font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+.alert-evidence-empty { margin: 0; color: #aebbd0; font-size: 10px; line-height: 1.55; }
+.alert-evidence-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.alert-evidence-two-column > .alert-evidence-section { min-width: 0; }
+.alert-evidence-readable .incident-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.alert-evidence-readable .incident-evidence-field { min-width: 0; }
+.alert-evidence-readable .incident-evidence-field > strong { overflow-wrap: anywhere; word-break: break-word; }
+.alert-evidence-readable .incident-evidence-list-item { background: #29384d; }
+@media (max-width: 700px) {
+  .alert-evidence-two-column { grid-template-columns: 1fr; }
+  .alert-evidence-readable .incident-evidence-grid { grid-template-columns: 1fr; }
+}
